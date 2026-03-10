@@ -4,6 +4,7 @@ import cv2
 import face_recognition
 import pickle
 import sys
+import numpy as np
 from scipy.spatial import distance as dist
 
 os.chdir("/home/shivam45783/face_unlock")
@@ -31,9 +32,6 @@ for user in os.listdir(faces_dir):
                 known_encodings.append(pickle.load(f))
                 known_users.append(user)
 
-with open("/tmp/face_debug.txt","a") as f:
-    f.write("Script started\n")
-
 video = cv2.VideoCapture(2)
 
 frames_to_check = 15
@@ -60,10 +58,22 @@ for i in range(frames_to_check):
     if not ret:
         continue
 
+    # Handle IR cameras sometimes returning grayscale
     if len(frame.shape) == 2:
         frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
 
-    small = cv2.resize(frame, (0,0), fx=0.25, fy=0.25)
+    # ------------------------------
+    # Lighting normalization
+    # ------------------------------
+    ycrcb = cv2.cvtColor(frame, cv2.COLOR_BGR2YCrCb)
+    ycrcb[:,:,0] = cv2.equalizeHist(ycrcb[:,:,0])
+    frame = cv2.cvtColor(ycrcb, cv2.COLOR_YCrCb2BGR)
+
+    # Slight blur to reduce noise
+    frame = cv2.GaussianBlur(frame,(5,5),0)
+
+    # Less aggressive resize (better face detail)
+    small = cv2.resize(frame, (0,0), fx=0.5, fy=0.5)
 
     rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
 
@@ -91,7 +101,8 @@ for i in range(frames_to_check):
     print("Best match:", matched_user)
     print("Face distance:", best_distance)
 
-    if best_distance < 0.5:
+    # Slightly relaxed threshold
+    if best_distance < 0.55:
         matches += 1
 
     # ------------------------------
