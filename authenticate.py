@@ -1,5 +1,4 @@
 import os
-import time
 import cv2
 import face_recognition
 import pickle
@@ -10,7 +9,7 @@ from scipy.spatial import distance as dist
 os.chdir("/home/shivam45783/face_unlock")
 
 # ------------------------------
-# Load all registered faces (multi-user + multi-sample)
+# Load registered faces
 # ------------------------------
 known_encodings = []
 known_users = []
@@ -19,7 +18,7 @@ faces_dir = "faces"
 
 for user in os.listdir(faces_dir):
 
-    user_path = os.path.join(faces_dir,user)
+    user_path = os.path.join(faces_dir, user)
 
     if not os.path.isdir(user_path):
         continue
@@ -28,25 +27,38 @@ for user in os.listdir(faces_dir):
 
         if file.endswith(".pkl"):
 
-            with open(os.path.join(user_path,file),"rb") as f:
+            with open(os.path.join(user_path, file), "rb") as f:
                 known_encodings.append(pickle.load(f))
                 known_users.append(user)
 
-video = cv2.VideoCapture(2)
+# ------------------------------
+# Camera
+# ------------------------------
+video = cv2.VideoCapture(0)
 
-frames_to_check = 15
+frames_to_check = 25
 matches = 0
 
+# ------------------------------
+# Blink detection parameters
+# ------------------------------
+EAR_THRESHOLD = 0.23
+
 blink_detected = False
+prev_ear = 1.0
+
 
 # ------------------------------
 # Blink detection function
 # ------------------------------
 def eye_aspect_ratio(eye):
+
     A = dist.euclidean(eye[1], eye[5])
     B = dist.euclidean(eye[2], eye[4])
     C = dist.euclidean(eye[0], eye[3])
+
     return (A + B) / (2.0 * C)
+
 
 # ------------------------------
 # Authentication loop
@@ -58,7 +70,7 @@ for i in range(frames_to_check):
     if not ret:
         continue
 
-    # Handle IR cameras sometimes returning grayscale
+    # Handle grayscale cameras
     if len(frame.shape) == 2:
         frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
 
@@ -66,14 +78,14 @@ for i in range(frames_to_check):
     # Lighting normalization
     # ------------------------------
     ycrcb = cv2.cvtColor(frame, cv2.COLOR_BGR2YCrCb)
-    ycrcb[:,:,0] = cv2.equalizeHist(ycrcb[:,:,0])
+    ycrcb[:, :, 0] = cv2.equalizeHist(ycrcb[:, :, 0])
     frame = cv2.cvtColor(ycrcb, cv2.COLOR_YCrCb2BGR)
 
-    # Slight blur to reduce noise
-    frame = cv2.GaussianBlur(frame,(5,5),0)
+    # Noise reduction
+    frame = cv2.GaussianBlur(frame, (5, 5), 0)
 
-    # Less aggressive resize (better face detail)
-    small = cv2.resize(frame, (0,0), fx=0.5, fy=0.5)
+    # Resize for faster processing
+    small = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
 
     rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
 
@@ -89,7 +101,7 @@ for i in range(frames_to_check):
         continue
 
     # ------------------------------
-    # Face recognition (multi-user + multi-sample)
+    # Face recognition
     # ------------------------------
     distances = face_recognition.face_distance(known_encodings, encodings[0])
 
@@ -101,8 +113,7 @@ for i in range(frames_to_check):
     print("Best match:", matched_user)
     print("Face distance:", best_distance)
 
-    # Slightly relaxed threshold
-    if best_distance < 0.55:
+    if best_distance < 0.58:
         matches += 1
 
     # ------------------------------
@@ -120,8 +131,18 @@ for i in range(frames_to_check):
 
     print("EAR:", ear)
 
-    if ear < 0.23:
+    # Detect blink (transition from open -> closed)
+    if prev_ear > EAR_THRESHOLD and ear < EAR_THRESHOLD:
         blink_detected = True
+        print("Blink detected")
+
+    prev_ear = ear
+
+    # ------------------------------
+    # Stop early if success
+    # ------------------------------
+    if matches >= 4 and blink_detected:
+        break
 
 video.release()
 
@@ -129,11 +150,12 @@ print("Matches:", matches)
 print("Blink detected:", blink_detected)
 
 # ------------------------------
-# Final authentication decision
+# Final decision
 # ------------------------------
-if matches >= 5 and blink_detected:
+if matches >= 4 and blink_detected:
     print("Authentication successful (live user)")
     sys.exit(0)
+
 else:
     print("Authentication failed")
     sys.exit(1)
